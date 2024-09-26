@@ -134,13 +134,13 @@ type TestServer interface {
 	PGURL() *url.URL
 	// WaitForInit retries until a SQL connection is successfully established to
 	// this server.
-	WaitForInit() error
+	WaitForInit(t *testing.T) error
 	// BaseDir returns directory StoreOnDiskOpt writes to if used.
 	BaseDir() string
 
 	// WaitForInitFinishForNode waits until a node has completed
 	// initialization and is available to connect to and query on.
-	WaitForInitFinishForNode(numNode int) error
+	WaitForInitFinishForNode(t *testing.T, numNode int) error
 	// StartNode runs the "cockroach start" command for the node.
 	StartNode(i int) error
 	// StopNode kills the node's process.
@@ -213,7 +213,7 @@ func NewDBForTestWithDatabase(
 	t *testing.T, database string, opts ...TestServerOpt,
 ) (*sql.DB, func()) {
 	t.Helper()
-	ts, err := NewTestServer(opts...)
+	ts, err := NewTestServer(t, opts...)
 	if err != nil {
 		if errors.Is(err, errStoppedInMiddle) {
 			// If the testserver is intentionally killed in the middle,
@@ -466,7 +466,7 @@ var errStoppedInMiddle = errors.New("download stopped in middle")
 // The cockroach binary for your OS and ARCH is downloaded automatically.
 // If the download fails, we attempt just call "cockroach", hoping it is
 // found in your path.
-func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
+func NewTestServer(t *testing.T, opts ...TestServerOpt) (TestServer, error) {
 	baseDir, err := os.MkdirTemp("", "cockroach-testserver")
 	if err != nil {
 		return nil, fmt.Errorf("%s: could not create temp directory: %w", testserverMessagePrefix, err)
@@ -481,6 +481,7 @@ func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
 	for _, applyOptToArgs := range opts {
 		applyOptToArgs(serverArgs)
 	}
+	t.Logf("cockroach logs directory: %s", serverArgs.cockroachLogsDir)
 	log.Printf("cockroach logs directory: %s", serverArgs.cockroachLogsDir)
 
 	crDBBinaryPath := GetCustomBinaryFlag()
@@ -506,6 +507,7 @@ func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
 	}
 
 	if serverArgs.cockroachBinary != "" {
+		t.Logf("Using custom cockroach binary: %s", serverArgs.cockroachBinary)
 		log.Printf("Using custom cockroach binary: %s", serverArgs.cockroachBinary)
 		cockroachBinary, err := filepath.Abs(serverArgs.cockroachBinary)
 		if err == nil {
@@ -520,9 +522,11 @@ func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
 				// return error.
 				return nil, err
 			}
+			t.Logf("%s: Failed to fetch latest binary: %v attempting to use cockroach binary from your PATH", testserverMessagePrefix, err)
 			log.Printf("%s: Failed to fetch latest binary: %v attempting to use cockroach binary from your PATH", testserverMessagePrefix, err)
 			serverArgs.cockroachBinary = "cockroach"
 		} else {
+			t.Logf("Using automatically-downloaded binary: %s", serverArgs.cockroachBinary)
 			log.Printf("Using automatically-downloaded binary: %s", serverArgs.cockroachBinary)
 		}
 	}
@@ -556,6 +560,7 @@ func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
 			{"cert", "create-client", "root", "--also-generate-pkcs8-key"},
 		} {
 			createCertCmd := exec.Command(serverArgs.cockroachBinary, append(args, certArgs...)...)
+			t.Logf("%s executing: %s", testserverMessagePrefix, createCertCmd)
 			log.Printf("%s executing: %s", testserverMessagePrefix, createCertCmd)
 			if err := createCertCmd.Run(); err != nil {
 				return nil, fmt.Errorf("%s command %s failed: %w", testserverMessagePrefix, createCertCmd, err)
@@ -689,7 +694,7 @@ func NewTestServer(opts ...TestServerOpt) (TestServer, error) {
 		return nil, fmt.Errorf("%s: url not found", testserverMessagePrefix)
 	}
 
-	if err := ts.WaitForInit(); err != nil {
+	if err := ts.WaitForInit(t); err != nil {
 		return nil, fmt.Errorf("%s WaitForInit failed: %w", testserverMessagePrefix, err)
 	}
 
@@ -744,7 +749,7 @@ func (ts *testServerImpl) setPGURLForNode(nodeNum int, u *url.URL) {
 	close(ts.pgURL[nodeNum].set)
 }
 
-func (ts *testServerImpl) WaitForInitFinishForNode(nodeIdx int) error {
+func (ts *testServerImpl) WaitForInitFinishForNode(t *testing.T, nodeIdx int) error {
 	pgURL := ts.PGURLForNode(nodeIdx).String()
 	for i := 0; i < ts.serverArgs.initTimeoutSeconds*10; i++ {
 		err := func() error {
@@ -765,9 +770,16 @@ func (ts *testServerImpl) WaitForInitFinishForNode(nodeIdx int) error {
 		if err == nil {
 			return nil
 		}
+		t.Logf("%s: WaitForInitFinishForNode %d (%s): Trying again after error: %v", testserverMessagePrefix, nodeIdx, pgURL, err)
 		log.Printf("%s: WaitForInitFinishForNode %d (%s): Trying again after error: %v", testserverMessagePrefix, nodeIdx, pgURL, err)
 		time.Sleep(time.Millisecond * 100)
 	}
+	t.Logf(
+		"init did not finish for node %d\n\nstdout:\n%s\n\nstderr:\n:%s",
+		nodeIdx,
+		ts.StdoutForNode(nodeIdx),
+		ts.StderrForNode(nodeIdx),
+	)
 	log.Printf(
 		"init did not finish for node %d\n\nstdout:\n%s\n\nstderr:\n:%s",
 		nodeIdx,
@@ -778,8 +790,8 @@ func (ts *testServerImpl) WaitForInitFinishForNode(nodeIdx int) error {
 }
 
 // WaitForInit retries until a connection is successfully established.
-func (ts *testServerImpl) WaitForInit() error {
-	return ts.WaitForInitFinishForNode(0)
+func (ts *testServerImpl) WaitForInit(t *testing.T) error {
+	return ts.WaitForInitFinishForNode(t, 0)
 }
 
 func (ts *testServerImpl) pollListeningURLFile(nodeNum int) error {

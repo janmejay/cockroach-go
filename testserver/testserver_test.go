@@ -31,8 +31,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/janmejay/cockroach-go/v2/testserver"
 	"github.com/stretchr/testify/require"
+
+	"github.com/janmejay/cockroach-go/v2/testserver"
 )
 
 const noPW = ""
@@ -256,7 +257,7 @@ func TestRunServer(t *testing.T) {
 
 func TestCockroachBinaryPathOpt(t *testing.T) {
 	crdbBinary := "doesnotexist"
-	_, err := testserver.NewTestServer(testserver.CockroachBinaryPathOpt(crdbBinary))
+	_, err := testserver.NewTestServer(t, testserver.CockroachBinaryPathOpt(crdbBinary))
 	if err == nil {
 		t.Fatal("expected err, got nil")
 	}
@@ -296,7 +297,7 @@ func TestCockroachExternalIODirOpt(t *testing.T) {
 }
 
 func TestPGURLWhitespace(t *testing.T) {
-	ts, err := testserver.NewTestServer()
+	ts, err := testserver.NewTestServer(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +311,7 @@ func TestSingleNodePort(t *testing.T) {
 	port, err := getFreePort()
 	require.NoError(t, err)
 
-	ts, err := testserver.NewTestServer(testserver.AddListenAddrPortOpt(port))
+	ts, err := testserver.NewTestServer(t, testserver.AddListenAddrPortOpt(port))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +334,7 @@ func TestSingleNodePort(t *testing.T) {
 // tenantInterface is defined in order to use tenant-related methods on the
 // TestServer.
 type tenantInterface interface {
-	NewTenantServer(proxy bool) (testserver.TestServer, error)
+	NewTenantServer(t *testing.T, proxy bool) (testserver.TestServer, error)
 }
 
 // newTenantDBForTest is a testing helper function that starts a TestServer
@@ -367,11 +368,11 @@ func newTenantDBForTest(
 	if nonStableDB {
 		opts = append(opts, testserver.NonStableDbOpt())
 	}
-	ts, err := testserver.NewTestServer(opts...)
+	ts, err := testserver.NewTestServer(t, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant, err := ts.(tenantInterface).NewTenantServer(proxy)
+	tenant, err := ts.(tenantInterface).NewTenantServer(t, proxy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,6 +522,7 @@ func TestRestartNodeParallel(t *testing.T) {
 func testRestartNode(t *testing.T, ports []int, binaryPath string) {
 	const pollListenURLTimeout = 150
 	ts, err := testserver.NewTestServer(
+		t,
 		testserver.ThreeNodeOpt(),
 		testserver.StoreOnDiskOpt(),
 		testserver.AddListenAddrPortOpt(ports[0]),
@@ -531,7 +533,7 @@ func testRestartNode(t *testing.T, ports []int, binaryPath string) {
 	require.NoError(t, err)
 	defer ts.Stop()
 	for i := 0; i < 3; i++ {
-		require.NoError(t, ts.WaitForInitFinishForNode(i))
+		require.NoError(t, ts.WaitForInitFinishForNode(t, i))
 	}
 
 	log.Printf("Stopping Node 0")
@@ -549,7 +551,7 @@ func testRestartNode(t *testing.T, ports []int, binaryPath string) {
 	}
 
 	require.NoError(t, ts.StartNode(0))
-	require.NoError(t, ts.WaitForInitFinishForNode(0))
+	require.NoError(t, ts.WaitForInitFinishForNode(t, 0))
 
 	for i := 0; i < 3; i++ {
 		url := ts.PGURLForNode(i)
@@ -632,6 +634,7 @@ func TestUpgradeNode(t *testing.T) {
 	require.NoError(t, err)
 
 	ts, err := testserver.NewTestServer(
+		t,
 		testserver.ThreeNodeOpt(),
 		testserver.CockroachBinaryPathOpt(absPathOldBinary),
 		testserver.UpgradeCockroachBinaryPathOpt(absPathNewBinary),
@@ -641,7 +644,7 @@ func TestUpgradeNode(t *testing.T) {
 	defer ts.Stop()
 
 	for i := 0; i < 3; i++ {
-		require.NoError(t, ts.WaitForInitFinishForNode(i))
+		require.NoError(t, ts.WaitForInitFinishForNode(t, i))
 	}
 
 	url := ts.PGURL()
@@ -662,7 +665,7 @@ func TestUpgradeNode(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, ts.UpgradeNode(i))
-		require.NoError(t, ts.WaitForInitFinishForNode(i))
+		require.NoError(t, ts.WaitForInitFinishForNode(t, i))
 	}
 
 	for i := 0; i < 3; i++ {
@@ -793,12 +796,13 @@ func removeExistingLocalFile(localFile string) error {
 
 func TestLocalityFlagsOpt(t *testing.T) {
 	ts, err := testserver.NewTestServer(
+		t,
 		testserver.ThreeNodeOpt(),
 		testserver.LocalityFlagsOpt("region=us-east1", "region=us-central1", "region=us-west1"))
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
-		ts.WaitForInitFinishForNode(i)
+		ts.WaitForInitFinishForNode(t, i)
 	}
 
 	db, err := sql.Open("postgres", ts.PGURL().String())
@@ -828,12 +832,13 @@ func TestCockroachLogsDirOpt(t *testing.T) {
 	defer require.NoError(t, os.RemoveAll(logsDir))
 
 	ts, err := testserver.NewTestServer(
+		t,
 		testserver.ThreeNodeOpt(),
 		testserver.CockroachLogsDirOpt(logsDir))
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
-		if err := ts.WaitForInitFinishForNode(i); err != nil {
+		if err := ts.WaitForInitFinishForNode(t, i); err != nil {
 			// Make sure we stop the testserver in this case as well.
 			ts.Stop()
 			require.NoError(t, err)

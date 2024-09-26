@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/janmejay/cockroach-go/v2/testserver/version"
 )
@@ -70,7 +71,7 @@ func (ts *testServerImpl) cockroachSupportsTenantScopeCert() (bool, error) {
 // NOTE: To use this, a caller must first define an interface that includes
 // NewTenantServer, and subsequently cast the TestServer obtained from
 // NewTestServer to this interface. Refer to the tests for an example.
-func (ts *testServerImpl) NewTenantServer(proxy bool) (TestServer, error) {
+func (ts *testServerImpl) NewTenantServer(t *testing.T, proxy bool) (TestServer, error) {
 	if proxy && !ts.serverArgs.secure {
 		return nil, fmt.Errorf("%s: proxy cannot be used with insecure mode", tenantserverMessagePrefix)
 	}
@@ -132,7 +133,7 @@ func (ts *testServerImpl) NewTenantServer(proxy bool) (TestServer, error) {
 		}
 	}
 	// Create a new tenant.
-	if err := ts.WaitForInit(); err != nil {
+	if err := ts.WaitForInit(t); err != nil {
 		return nil, fmt.Errorf("%s WaitForInit failed: %w", tenantserverMessagePrefix, err)
 	}
 	pgURL := ts.PGURL()
@@ -261,7 +262,7 @@ func (ts *testServerImpl) NewTenantServer(proxy bool) (TestServer, error) {
 	if err := tenant.Start(); err != nil {
 		return nil, fmt.Errorf("%s Start failed : %w", tenantserverMessagePrefix, err)
 	}
-	if err := tenant.WaitForInit(); err != nil {
+	if err := tenant.WaitForInit(t); err != nil {
 		return nil, fmt.Errorf("%s WaitForInit failed: %w", tenantserverMessagePrefix, err)
 	}
 
